@@ -1,7 +1,8 @@
-import tkinter as tk
+ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
 import csv
-import random
+import copy 
+import numpy as np 
 
 # ------------------------------------------------------------------
 # MODELO (Lógica de Negocio)
@@ -11,25 +12,27 @@ class Jugador:
     def __init__(self, nombre, posicion, resistencia):
         self.nombre = nombre
         self.posicion = posicion
-        self.resistencia = int(resistencia)
-        self.resistencia_max = int(resistencia)
+        # La resistencia se convierte a float para usarla con NumPy en la simulación
+        self.resistencia = float(resistencia) 
+        self.resistencia_max = float(resistencia)
         
-        # CORRECCIÓN 2: Definir perfil ofensivo/defensivo según posición
-        if posicion.lower() in ["portero", "defensa"]:
+        # Definir perfil ofensivo/defensivo según posición
+        pos = posicion.lower()
+        if pos in ["portero", "defensa"]:
             self.defensa = 0.8
             self.ataque = 0.2
-        elif posicion.lower() == "mediocampista":
+        elif pos == "mediocampista":
             self.defensa = 0.5
             self.ataque = 0.5
-        elif posicion.lower() == "delantero":
+        elif pos == "delantero":
             self.defensa = 0.2
             self.ataque = 0.8
         else:
-            # Valor por defecto si hay error de tipeo
             self.defensa = 0.5
             self.ataque = 0.5
 
     def cansar(self, cantidad):
+        """Reduce la resistencia. La cantidad ya puede ser un float de NumPy."""
         self.resistencia -= cantidad
         if self.resistencia < 0: self.resistencia = 0
 
@@ -38,12 +41,10 @@ class Equipo:
         self.nombre = nombre_equipo
         self.goles = 0
         
-        # Separar titulares (primeros 11) y banca (el resto)
         if len(lista_jugadores) >= 11:
             self.titulares = lista_jugadores[:11]
             self.banca = lista_jugadores[11:]
         else:
-            # Caso de emergencia si el CSV tiene pocos datos
             self.titulares = lista_jugadores
             self.banca = []
             
@@ -52,13 +53,17 @@ class Equipo:
 
     def calcular_tactica(self):
         """
-        CORRECCIÓN 2: La táctica depende de los jugadores en cancha.
-        Sumamos los atributos de ataque y defensa de los 11 titulares.
+        Calcula la táctica usando np.sum() para una suma vectorial más eficiente.
         """
-        total_ataque = sum(j.ataque for j in self.titulares)
-        total_defensa = sum(j.defensa for j in self.titulares)
+        # Extraer atributos a un array de NumPy
+        ataques = np.array([j.ataque for j in self.titulares])
+        defensas = np.array([j.defensa for j in self.titulares])
         
-        if total_ataque > total_defensa + 1: # Margen para no oscilar tanto
+        # Suma vectorial (mucho más rápida)
+        total_ataque = np.sum(ataques)
+        total_defensa = np.sum(defensas)
+        
+        if total_ataque > total_defensa + 1: 
             self.tactica_actual = "OFENSIVA"
         elif total_defensa > total_ataque + 1:
             self.tactica_actual = "DEFENSIVA"
@@ -69,61 +74,60 @@ class Equipo:
 
     def verificar_cambios(self, minuto):
         """
-        MEJORA 2.c: La resistencia es factor de decisión para cambios.
-        Si un jugador tiene < 30% de resistencia, pide cambio.
+        Verifica cambios por baja resistencia (Lógica sin NumPy, basada en objetos).
         """
         mensajes = []
-        if self.cambios_realizados >= 5: # Supongamos límite de 5 cambios
+        if self.cambios_realizados >= 5:
             return mensajes
 
+        indices_a_cambiar = []
         for i, jugador in enumerate(self.titulares):
-            # Si el jugador está muy cansado (menos del 30% de su inicial)
             if jugador.resistencia < (jugador.resistencia_max * 0.3) and self.banca:
+                indices_a_cambiar.append(i)
+        
+        for i in indices_a_cambiar:
+            if self.cambios_realizados >= 5:
+                break
                 
-                # Buscar un reemplazo adecuado en la banca (misma posición preferiblemente)
-                reemplazo = None
-                for suplente in self.banca:
-                    if suplente.posicion == jugador.posicion:
-                        reemplazo = suplente
-                        break
+            jugador = self.titulares[i]
+            
+            reemplazo = None
+            for suplente in self.banca:
+                if suplente.posicion == jugador.posicion:
+                    reemplazo = suplente
+                    break
+            
+            if not reemplazo and self.banca:
+                reemplazo = self.banca[0]
+            
+            if reemplazo:
+                self.titulares[i] = reemplazo
+                self.banca.remove(reemplazo)
+                self.cambios_realizados += 1
                 
-                # Si no hay de la misma posición, toma el primero que haya
-                if not reemplazo and self.banca:
-                    reemplazo = self.banca[0]
+                mensajes.append(f"🔄 CAMBIO en {self.nombre} al min {minuto}: "
+                                f"Sale {jugador.nombre} ({jugador.posicion}) cansado, "
+                                f"Entra {reemplazo.nombre} ({reemplazo.posicion}).")
                 
-                if reemplazo:
-                    # Ejecutar cambio
-                    self.titulares[i] = reemplazo
-                    self.banca.remove(reemplazo)
-                    self.cambios_realizados += 1
-                    
-                    # Log del evento
-                    mensajes.append(f"🔄 CAMBIO en {self.nombre} al min {minuto}: "
-                                    f"Sale {jugador.nombre} ({jugador.posicion}) cansado, "
-                                    f"Entra {reemplazo.nombre} ({reemplazo.posicion}).")
-                    
-                    if self.cambios_realizados >= 5:
-                        break
         return mensajes
 
 # ------------------------------------------------------------------
-# MOTOR DE SIMULACIÓN
+# MOTOR DE SIMULACIÓN (Uso intensivo de NumPy)
 # ------------------------------------------------------------------
 
 class SimuladorPartido:
     def __init__(self, equipo_a, equipo_b):
-        self.eq_a = equipo_a
-        self.eq_b = equipo_b
-        self.log = [] # Aquí guardamos el minuto a minuto
-        self.eventos_clave = [] # Goles y resumen final
+        self.eq_a = copy.deepcopy(equipo_a)
+        self.eq_b = copy.deepcopy(equipo_b)
+        self.log = [] 
+        self.eventos_clave = [] 
 
     def simular(self):
         self.log.append(f"--- INICIO DEL PARTIDO: {self.eq_a.nombre} vs {self.eq_b.nombre} ---")
         
-        # CORRECCIÓN 3: Ciclo Minuto a Minuto
         for minuto in range(1, 91):
             
-            # 1. Calcular tácticas actuales
+            # 1. Calcular tácticas actuales (usa np.sum internamente)
             atq_a, def_a = self.eq_a.calcular_tactica()
             atq_b, def_b = self.eq_b.calcular_tactica()
             
@@ -135,36 +139,38 @@ class SimuladorPartido:
                 self.eventos_clave.append(m)
 
             # 3. Probabilidad de Gol
-            # La probabilidad depende de (Mi Ataque vs Defensa Rival)
-            # Factor base muy bajo porque es por minuto
             prob_gol_a = (atq_a / (def_b + 0.1)) * 0.015 
             prob_gol_b = (atq_b / (def_a + 0.1)) * 0.015
 
             # Intento de gol A
-            if random.random() < prob_gol_a:
-                autor = random.choice(self.eq_a.titulares)
+            if np.random.rand() < prob_gol_a: # np.random.rand() es el equivalente a random.random()
+                autor = np.random.choice(self.eq_a.titulares) # np.random.choice() es el equivalente a random.choice()
                 self.eq_a.goles += 1
                 msg = f"⚽ ¡GOOOL de {self.eq_a.nombre}! (Min {minuto}) - {autor.nombre} ({autor.posicion})"
                 self.log.append(msg)
                 self.eventos_clave.append(msg)
 
             # Intento de gol B
-            elif random.random() < prob_gol_b:
-                autor = random.choice(self.eq_b.titulares)
+            elif np.random.rand() < prob_gol_b:
+                autor = np.random.choice(self.eq_b.titulares)
                 self.eq_b.goles += 1
                 msg = f"⚽ ¡GOOOL de {self.eq_b.nombre}! (Min {minuto}) - {autor.nombre} ({autor.posicion})"
                 self.log.append(msg)
                 self.eventos_clave.append(msg)
             
-            # 4. Desgaste de jugadores (reducir resistencia)
-            # Si el equipo es OFENSIVO, se cansan más rápido
+            # 4. Desgaste de jugadores (IMPLEMENTACIÓN CON NUMPY)
             factor_cansancio_a = 1.2 if self.eq_a.tactica_actual == "OFENSIVA" else 0.8
             factor_cansancio_b = 1.2 if self.eq_b.tactica_actual == "OFENSIVA" else 0.8
+            
+            # Generar un array de desgaste aleatorio de una sola vez
+            desgaste_a = np.random.uniform(0.5, 1.5, size=len(self.eq_a.titulares)) * factor_cansancio_a
+            desgaste_b = np.random.uniform(0.5, 1.5, size=len(self.eq_b.titulares)) * factor_cansancio_b
 
-            for j in self.eq_a.titulares: j.cansar(random.uniform(0.5, 1.5) * factor_cansancio_a)
-            for j in self.eq_b.titulares: j.cansar(random.uniform(0.5, 1.5) * factor_cansancio_b)
+            # Aplicar el desgaste a los objetos Jugador usando zip
+            for j, d in zip(self.eq_a.titulares, desgaste_a): j.cansar(d)
+            for j, d in zip(self.eq_b.titulares, desgaste_b): j.cansar(d)
 
-            # Log discreto de táctica (opcional, para no llenar pantalla)
+            # Log discreto de táctica
             if minuto % 15 == 0:
                 self.log.append(f"⏱ Min {minuto} | Tácticas -> {self.eq_a.nombre}: {self.eq_a.tactica_actual} vs {self.eq_b.nombre}: {self.eq_b.tactica_actual}")
 
@@ -172,113 +178,195 @@ class SimuladorPartido:
         return self.log, self.eventos_clave
 
 # ------------------------------------------------------------------
-# INTERFAZ GRÁFICA (GUI) - MEJORA 1 y 3
+# INTERFAZ GRÁFICA (GUI) MEJORADA (sin cambios)
 # ------------------------------------------------------------------
 
 class InterfazFutbol:
     def __init__(self, root):
         self.root = root
-        self.root.title("Simulador de Partido Táctico v2.0")
-        self.root.geometry("700x600")
+        self.root.title("⚽ Simulador Táctico de Fútbol ⚽")
+        self.root.geometry("750x650")
+        
+        COLOR_FONDO = "#E8E8E8"
+        COLOR_PRIMARIO = "#4CAF50"
+        COLOR_SECUNDARIO = "#34495E"
+        COLOR_CONTRASTE = "#FFC300"
+        
+        self.root.config(bg=COLOR_FONDO)
 
-        # Variables para rutas de archivos
-        self.ruta_a = tk.StringVar()
-        self.ruta_b = tk.StringVar()
+        self.ruta_a = tk.StringVar(value="[Cargar archivo CSV del Equipo A]")
+        self.ruta_b = tk.StringVar(value="[Cargar archivo CSV del Equipo B]")
+        self.equipo_A = None
+        self.equipo_B = None
 
-        # --- SECCIÓN DE CARGA ---
-        frame_carga = tk.LabelFrame(root, text="Carga de Equipos (CSV)", padx=10, pady=10)
-        frame_carga.pack(fill="x", padx=10, pady=5)
+        tk.Label(root, text="SIMULADOR DE PARTIDO TÁCTICO", 
+                 font=("Arial", 18, "bold"), 
+                 bg=COLOR_SECUNDARIO, 
+                 fg="white", 
+                 pady=10).pack(fill="x", padx=10, pady=(10, 5))
 
-        tk.Button(frame_carga, text="Cargar Equipo A", command=lambda: self.cargar_csv("A")).grid(row=0, column=0, padx=5)
-        tk.Label(frame_carga, textvariable=self.ruta_a).grid(row=0, column=1)
+        frame_carga = tk.LabelFrame(root, text="📁 CARGA DE EQUIPOS (CSV)", 
+                                    font=("Arial", 10, "bold"),
+                                    bg="white", 
+                                    fg=COLOR_SECUNDARIO, 
+                                    padx=15, pady=10)
+        frame_carga.pack(fill="x", padx=15, pady=10)
 
-        tk.Button(frame_carga, text="Cargar Equipo B", command=lambda: self.cargar_csv("B")).grid(row=1, column=0, padx=5)
-        tk.Label(frame_carga, textvariable=self.ruta_b).grid(row=1, column=1)
+        tk.Button(frame_carga, text="CARGAR EQUIPO A", 
+                  command=lambda: self.cargar_csv("A"), 
+                  bg=COLOR_PRIMARIO, fg="white", 
+                  font=("Arial", 10, "bold"), 
+                  relief=tk.RAISED, bd=3).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        
+        tk.Label(frame_carga, textvariable=self.ruta_a, 
+                 bg=COLOR_FONDO, fg=COLOR_SECUNDARIO, 
+                 anchor="w", width=60, relief=tk.SUNKEN, padx=5).grid(row=0, column=1, padx=10, sticky="ew")
 
-        self.btn_simular = tk.Button(root, text="⚽ JUGAR PARTIDO ⚽", command=self.ejecutar_simulacion, bg="#4CAF50", fg="white", font=("Arial", 12, "bold"))
-        self.btn_simular.pack(pady=10)
+        tk.Button(frame_carga, text="CARGAR EQUIPO B", 
+                  command=lambda: self.cargar_csv("B"), 
+                  bg=COLOR_PRIMARIO, fg="white", 
+                  font=("Arial", 10, "bold"), 
+                  relief=tk.RAISED, bd=3).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        
+        tk.Label(frame_carga, textvariable=self.ruta_b, 
+                 bg=COLOR_FONDO, fg=COLOR_SECUNDARIO, 
+                 anchor="w", width=60, relief=tk.SUNKEN, padx=5).grid(row=1, column=1, padx=10, sticky="ew")
 
-        # --- SECCIÓN DE RESULTADOS ---
-        frame_res = tk.Frame(root)
-        frame_res.pack(fill="both", expand=True, padx=10)
+        self.btn_simular = tk.Button(root, text="¡INICIAR PARTIDO! 🥅", 
+                                     command=self.ejecutar_simulacion, 
+                                     bg="#9E9E9E", fg="white", 
+                                     font=("Arial", 14, "bold"), 
+                                     relief=tk.RAISED, bd=5, 
+                                     state=tk.DISABLED) 
+        self.btn_simular.pack(pady=15, padx=15, fill="x")
 
-        # Marcador
-        self.lbl_marcador = tk.Label(frame_res, text="0 - 0", font=("Arial", 24, "bold"))
-        self.lbl_marcador.pack()
+        frame_res = tk.LabelFrame(root, text="📢 RESULTADOS Y MINUTO A MINUTO", 
+                                  font=("Arial", 10, "bold"),
+                                  bg="white", 
+                                  fg=COLOR_SECUNDARIO, 
+                                  padx=15, pady=10)
+        frame_res.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
-        # Area de texto para el Minuto a Minuto
-        tk.Label(frame_res, text="Reporte Minuto a Minuto:").pack(anchor="w")
-        self.txt_reporte = scrolledtext.ScrolledText(frame_res, height=15)
-        self.txt_reporte.pack(fill="both", expand=True)
+        self.lbl_marcador = tk.Label(frame_res, text="0 - 0", 
+                                     font=("Courier", 36, "bold"), 
+                                     bg=COLOR_SECUNDARIO, 
+                                     fg=COLOR_CONTRASTE, 
+                                     relief=tk.GROOVE,
+                                     padx=20, pady=10, 
+                                     anchor="center")
+        self.lbl_marcador.pack(fill="x", pady=(5, 10))
 
-        # Datos en memoria
-        self.jugadores_a = []
-        self.jugadores_b = []
-        self.nombre_a = "Equipo A"
-        self.nombre_b = "Equipo B"
+        tk.Label(frame_res, text="Detalles del Juego:", 
+                 bg="white", fg=COLOR_SECUNDARIO, 
+                 font=("Arial", 10, "bold")).pack(anchor="w")
+        
+        self.txt_reporte = scrolledtext.ScrolledText(frame_res, height=12, 
+                                                     font=("Consolas", 9), 
+                                                     bg="#F5F5F5", fg="#2C3E50", 
+                                                     relief=tk.SUNKEN)
+        self.txt_reporte.pack(fill="both", expand=True, pady=(5, 0))
+        self.txt_reporte.insert(tk.END, "Esperando la carga de dos equipos y simulación...")
 
-    def cargar_csv(self, equipo_id):
-        filepath = filedialog.askopenfilename(filetypes=[("Archivos CSV", "*.csv")])
-        if not filepath: return
 
+    def cargar_csv(self, equipo_letra):
+        """Abre un diálogo de archivo y carga los datos del CSV."""
+        ruta_archivo = filedialog.askopenfilename(
+            title=f"Seleccionar archivo CSV para Equipo {equipo_letra}",
+            filetypes=[("Archivos CSV", "*.csv")]
+        )
+        
+        if not ruta_archivo:
+            return 
+        
         try:
-            lista_temp = []
-            nombre_equipo = "Equipo Desconocido"
+            lista_jugadores = []
+            nombre_equipo = ""
             
-            with open(filepath, newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                # Intenta obtener el nombre del archivo como nombre del equipo
-                nombre_equipo = filepath.split("/")[-1].replace(".csv", "")
+            with open(ruta_archivo, mode='r', newline='', encoding='utf-8') as archivo:
+                lector = csv.DictReader(archivo)
                 
-                for row in reader:
-                    # Validar que existan las columnas
-                    j = Jugador(row['Nombre'], row['Posicion'], row['Resistencia'])
-                    lista_temp.append(j)
-            
-            if equipo_id == "A":
-                self.ruta_a.set(nombre_equipo)
-                self.jugadores_a = lista_temp
-                self.nombre_a = nombre_equipo
+                nombre_equipo = ruta_archivo.split('/')[-1].replace('.csv', '').upper()
+                
+                for fila in lector:
+                    if 'nombre' in fila and 'posicion' in fila and 'resistencia' in fila:
+                        jugador = Jugador(
+                            nombre=fila['nombre'],
+                            posicion=fila['posicion'],
+                            resistencia=fila['resistencia']
+                        )
+                        lista_jugadores.append(jugador)
+                    else:
+                        raise ValueError("CSV no tiene las columnas requeridas: nombre, posicion, resistencia.")
+
+            if len(lista_jugadores) < 1:
+                messagebox.showerror("Error de Carga", f"El archivo CSV para el Equipo {equipo_letra} no contiene jugadores válidos.")
+                return
+
+            nuevo_equipo = Equipo(nombre_equipo, lista_jugadores)
+
+            if equipo_letra == "A":
+                self.equipo_A = nuevo_equipo
+                self.ruta_a.set(f"{nombre_equipo} | Jugadores: {len(lista_jugadores)}")
             else:
-                self.ruta_b.set(nombre_equipo)
-                self.jugadores_b = lista_temp
-                self.nombre_b = nombre_equipo
-                
-            messagebox.showinfo("Éxito", f"Se cargaron {len(lista_temp)} jugadores para {nombre_equipo}.")
-            
+                self.equipo_B = nuevo_equipo
+                self.ruta_b.set(f"{nombre_equipo} | Jugadores: {len(lista_jugadores)}")
+
+            messagebox.showinfo("Carga Exitosa", f"Equipo {nombre_equipo} cargado con {len(lista_jugadores)} jugadores.")
+            self.verificar_simulacion_disponible()
+
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo leer el archivo CSV.\nVerifica que tenga columnas: Nombre,Posicion,Resistencia.\nError: {e}")
+            messagebox.showerror("Error de Carga", f"Ocurrió un error al cargar el archivo:\n{e}")
+            if equipo_letra == "A":
+                self.equipo_A = None
+                self.ruta_a.set("[Cargar archivo CSV del Equipo A] - ERROR")
+            else:
+                self.equipo_B = None
+                self.ruta_b.set("[Cargar archivo CSV del Equipo B] - ERROR")
+            self.verificar_simulacion_disponible()
+
+    def verificar_simulacion_disponible(self):
+        """Habilita el botón de simulación si ambos equipos están cargados."""
+        COLOR_CONTRASTE = "#FFC300"
+        
+        if self.equipo_A and self.equipo_B:
+            self.btn_simular.config(state=tk.NORMAL, bg=COLOR_CONTRASTE, fg="black") 
+            self.lbl_marcador.config(text=f"{self.equipo_A.nombre} 0 - 0 {self.equipo_B.nombre}")
+        else:
+            self.btn_simular.config(state=tk.DISABLED, bg="#9E9E9E", fg="white") 
+            self.lbl_marcador.config(text="0 - 0")
+
 
     def ejecutar_simulacion(self):
-        if not self.jugadores_a or not self.jugadores_b:
-            messagebox.showwarning("Atención", "Debes cargar ambos archivos CSV antes de jugar.")
+        """Inicia el motor de simulación y muestra los resultados."""
+        if not self.equipo_A or not self.equipo_B:
+            messagebox.showwarning("Advertencia", "Debes cargar ambos equipos antes de simular.")
             return
 
-        # Crear instancias de Equipos
-        # (Importante: creamos copias nuevas para que la resistencia se resetee si jugamos de nuevo)
-        import copy
-        eq_a = Equipo(self.nombre_a, copy.deepcopy(self.jugadores_a))
-        eq_b = Equipo(self.nombre_b, copy.deepcopy(self.jugadores_b))
-
-        # Iniciar Simulador
-        sim = SimuladorPartido(eq_a, eq_b)
-        log_completo, eventos = sim.simular()
-
-        # Mostrar Resultados en GUI
-        self.lbl_marcador.config(text=f"{eq_a.nombre} {eq_a.goles} - {eq_b.goles} {eq_b.nombre}")
-        
         self.txt_reporte.delete(1.0, tk.END)
-        for linea in log_completo:
-            self.txt_reporte.insert(tk.END, linea + "\n")
-            # Resaltar goles en el texto (opcional y básico)
-            if "GOOOL" in linea:
-                self.txt_reporte.tag_add("gol", "end-2l", "end-1l")
-                self.txt_reporte.tag_config("gol", foreground="red", font=("Arial", 10, "bold"))
+        COLOR_CONTRASTE = "#FFC300"
+        self.lbl_marcador.config(fg=COLOR_CONTRASTE) 
 
-        messagebox.showinfo("Partido Finalizado", f"Marcador Final:\n{eq_a.nombre}: {eq_a.goles}\n{eq_b.nombre}: {eq_b.goles}")
+        try:
+            simulador = SimuladorPartido(self.equipo_A, self.equipo_B)
+            log_minuto_a_minuto, eventos = simulador.simular()
+
+            for linea in log_minuto_a_minuto:
+                self.txt_reporte.insert(tk.END, linea + "\n")
+            
+            eq_a_final = simulador.eq_a
+            eq_b_final = simulador.eq_b
+
+            marcador_final = f"{eq_a_final.nombre} {eq_a_final.goles} - {eq_b_final.goles} {eq_b_final.nombre}"
+            self.lbl_marcador.config(text=marcador_final, fg="#FFFFFF") 
+            
+            resumen = f"RESULTADO FINAL:\n{marcador_final}\n\nEventos Clave:\n" + "\n".join(eventos)
+            messagebox.showinfo("Partido Terminado", resumen)
+
+        except Exception as e:
+            messagebox.showerror("Error de Simulación", f"Falló el motor de simulación:\n{e}")
 
 # ------------------------------------------------------------------
-# MAIN
+# EJECUCIÓN PRINCIPAL
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
