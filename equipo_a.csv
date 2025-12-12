@@ -1,0 +1,17 @@
+nombre,posicion,resistencia
+Roco,portero,90
+Paredes,defensa,95
+Central A,defensa,92
+Lateral 1,defensa,88
+Lateral 2,defensa,85
+Volante C,mediocampista,90
+Recuperador,mediocampista,95
+Creador,mediocampista,88
+Extremo A,delantero,80
+Goleador,delantero,98
+Punta A,delantero,90
+Suplente 1 D,defensa,70
+Suplente 2 M,mediocampista,75
+Suplente 3 D,delantero,65
+Suplente 4 P,portero,80
+Suplente 5 M,mediocampista,78

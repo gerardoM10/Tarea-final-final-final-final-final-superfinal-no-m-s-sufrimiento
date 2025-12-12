@@ -1,0 +1,17 @@
+nombre,posicion,resistencia
+Guardian,portero,85
+Defensor B,defensa,82
+Bloqueador,defensa,85
+Mediocampista 1,mediocampista,98
+Mediocampista 2,mediocampista,96
+Mediocampista 3,mediocampista,94
+Atacante 1,delantero,99
+Atacante 2,delantero,97
+Pivote B,delantero,95
+Extremo B,delantero,93
+Centro B,delantero,90
+Suplente 1 D,defensa,68
+Suplente 2 M,mediocampista,72
+Suplente 3 D,delantero,78
+Suplente 4 P,portero,75
+Suplente 5 D,defensa,71
